@@ -1,6 +1,6 @@
 import requests
 
-url = "http://127.0.0.1:8000/chat"   # <-- FIXED
+url = "http://127.0.0.1:8000/chat"   # FastAPI server URL
 
 payload = {
     "user_input": "hi",

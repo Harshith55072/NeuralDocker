@@ -4,18 +4,8 @@
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    StoppingCriteria,
-    StoppingCriteriaList,
-    TextIteratorStreamer,
-)
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer, StoppingCriteria, StoppingCriteriaList
 import torch
-from sentence_transformers import SentenceTransformer
-import faiss
-import numpy as np
-import json
 import uvicorn
 import threading
 
@@ -23,7 +13,6 @@ import threading
 # Model Configuration
 # ===================
 MODEL_PATH = "path_to_your_model"
-DATA_PATH = "path_to_your_data.json"
 
 # ======================
 # Load Tokenizer & Model
@@ -58,53 +47,24 @@ stop_ids = [model.config.eos_token_id]
 stopping_criteria = StoppingCriteriaList([StopOnTokens(stop_ids)])
 
 # ==========================
-# Role-based Prompt Templates
+# Role-based Prompt Template
 # ==========================
 roles = {
-    "default": "### Instruction:\n{context}\n{user}\n\n### Response:",
-    "Career_mentor": (
-        "### Instruction:\nYou are a friendly mentor who helps software engineering students. "
-        "Answer their doubts and guide them clearly. Do not assume anything unless asked. "
-        "Keep it short and to the point, and ask a clarifying question if needed.\n\n{context}\n{user}\n\n### Response:"
+    "default": "### Instruction:\n{user}\n\n### Response:",
+    "friendly_chat": (
+        "### Instruction:\nYou are a friendly chatbot. Keep things casual and engaging.\n\n{user}\n\n### Response:"
     ),
-    "Career_mentor-v2": (
+    "career_mentor": (
         "### Instruction:\nYou are a friendly software mentor. Only answer what the student asks. "
-        "Do not assume the field or topic. Keep answers short and clear. "
-        "Ask questions only if you need clarification.\n\n{context}\n{user}\n\n### Response:"
+        "Do not assume the field or topic. Keep answers short and clear.\n\n{user}\n\n### Response:"
     ),
 }
-active_role = "Career_mentor"
-
-# ==========================
-# Load Knowledge Base (RAG)
-# ==========================
-print("📚 Loading knowledge base...")
-
-docs = []
-if DATA_PATH.endswith(".json"):
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-        if isinstance(data, dict):
-            docs = list(data.values())
-        elif isinstance(data, list):
-            docs = data
-elif DATA_PATH.endswith(".txt"):
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        docs = [line.strip() for line in f if line.strip()]
-
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-doc_embeddings = embedder.encode(docs, show_progress_bar=True)
-
-dim = doc_embeddings.shape[1]
-index = faiss.IndexFlatL2(dim)
-index.add(np.array(doc_embeddings))
-
-print(f"✅ Knowledge base loaded with {len(docs)} entries.")
+active_role = "friendly_chat"
 
 # ================
 # FastAPI App
 # ================
-app = FastAPI(title="GPTQ + RAG Chat API")
+app = FastAPI(title="GPTQ Streaming API")
 
 class ChatRequest(BaseModel):
     user_input: str
@@ -115,28 +75,14 @@ def chat_stream(request: ChatRequest):
     user_input = request.user_input
     role = request.role if request.role in roles else active_role
 
-    # RAG context
-    greetings = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}
-    if user_input.strip().lower() in greetings or len(user_input.strip().split()) <= 2:
-        context = ""
-    else:
-        query_vec = embedder.encode([user_input])
-        D, I = index.search(np.array(query_vec), k=3)
-        retrieved_docs = []
-        for i in I[0]:
-            if isinstance(docs[i], dict) and "text" in docs[i]:
-                retrieved_docs.append(docs[i]["text"])
-            else:
-                retrieved_docs.append(str(docs[i]))
-        context = "\n".join(retrieved_docs)
-
     # Build prompt
-    full_prompt = roles[role].format(context=context, user=user_input)
+    full_prompt = roles[role].format(user=user_input)
     inputs = tokenizer(full_prompt, return_tensors="pt").to(model.device)
 
-    # Streamer
+    # Streamer setup
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
+    # Background thread for generation
     generation_kwargs = dict(
         **inputs,
         max_new_tokens=200,
@@ -148,18 +94,17 @@ def chat_stream(request: ChatRequest):
         stopping_criteria=stopping_criteria,
         streamer=streamer,
     )
-
-    # Run generation in background
     thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
     thread.start()
 
-    # SSE-compatible generator
+    # Token generator for SSE-like streaming
     def token_generator():
         for token in streamer:
             yield f"data: {token}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(token_generator(), media_type="text/event-stream")
+
 
 # Run server
 if __name__ == "__main__":
