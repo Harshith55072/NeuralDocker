@@ -183,4 +183,4 @@ You’re welcome to contribute! Some suggestions:
 
 ## License
 
-*(Choose your license here, e.g. MIT, Apache 2.0, etc.)*
+MIT
