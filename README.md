@@ -1,6 +1,6 @@
-# NeuralDocker
+# NeuralDocker-CodeBase
 
-NeuralDocker is a developer toolkit for running AI models locally. It includes pre-built Python scripts, microservices, and model configurations to help you get started quickly. The project is still in early stages: features like data generation, QLoRA support, and AWQ library integration are coming soon.
+NeuralDocker is developed as a developer toolkit for running AI models locally. It includes pre-built Python scripts, microservices, and model configurations to help you get started quickly. The project is still in early stages: features like data generation, QLoRA support, and AWQ library integration will be added in the future.
 
 ---
 
